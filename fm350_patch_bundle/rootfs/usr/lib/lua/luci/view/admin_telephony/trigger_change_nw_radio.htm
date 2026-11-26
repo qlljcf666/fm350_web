@@ -1,0 +1,13 @@
+<%+header%>
+
+<%
+	luci.sys.exec("mipc_wan_cli --nw_change_hw_radio")
+%>
+
+<h2 name="content"><%:Change hardware radio executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

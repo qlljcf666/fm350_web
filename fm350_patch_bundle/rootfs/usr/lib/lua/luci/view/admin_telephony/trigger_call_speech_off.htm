@@ -1,0 +1,13 @@
+<%+header%>
+
+<%
+	luci.sys.exec("amixer -D mtk_phonecall cset numid=1 0")
+%>
+
+<h2 name="content"><%:Speech off executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

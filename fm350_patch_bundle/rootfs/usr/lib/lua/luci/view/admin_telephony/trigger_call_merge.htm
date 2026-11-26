@@ -1,0 +1,13 @@
+<%+header%>
+
+<%
+	luci.sys.exec("mipc_wan_cli --merge_request")
+%>
+
+<h2 name="content"><%:Merge_call executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

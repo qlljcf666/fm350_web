@@ -1,0 +1,13 @@
+<%+header%>
+
+<%
+	luci.sys.exec("aplay -D mtk_phonecall /bin/tone.wav")
+%>
+
+<h2 name="content"><%:Play tone executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

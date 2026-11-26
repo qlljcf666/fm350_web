@@ -1,0 +1,13 @@
+<%+header%>
+
+<h2 name="detect"><%:Key detecting, dial after no input in 3s%></h2>
+
+<h3 name="result"> <%=luci.sys.exec("mipc_wan_cli --detect_and_dial")%> </h3>
+
+<h2 name="content"><%:Key detect and dial executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

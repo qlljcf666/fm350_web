@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>FM350 5G RedCap 管理</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="cbi-map fg-wrap">
+    <h2>FM350 5G RedCap 管理</h2>
+
+    <!-- ============ 顶部总览 ============ -->
+    <div class="fg-card fg-card-wide">
+        <div class="fg-actions" style="margin-top:0">
+            <button class="cbi-button cbi-button-action" id="refresh-all">刷新全部状态</button>
+            <button class="cbi-button" id="refresh-status">只刷新网络状态</button>
+            <button class="cbi-button" id="refresh-sms">只刷新短信状态</button>
+            <button class="cbi-button" id="refresh-lock">只刷新锁网锁频</button>
+            <button class="cbi-button" id="refresh-reboot">只刷新定时重启</button>
+        </div>
+        <div id="status-note" class="fg-muted" style="margin-top:10px">正在读取 FM350 当前状态……</div>
+        <div id="current-kv" class="fg-kv" style="margin-top:10px"></div>
+        <table class="fg-table fg-hidden" id="iface-table">
+            <thead><tr><th>NAME</th><th>MAC</th><th>STATE</th><th>IP</th><th>SPEED</th></tr></thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="fg-grid">
+
+        <!-- ============ 自动拨号 ============ -->
+        <div class="fg-card">
+            <h3>蜂窝自动拨号</h3>
+            <div id="dial-kv" class="fg-kv"></div>
+            <div class="fg-row">
+                <label for="apn">APN</label>
+                <input id="apn" type="text" value="internet" placeholder="CMCC / CUINTERNET / CTTNET / internet">
+            </div>
+            <div class="fg-row">
+                <label for="usb-mode">USB 工作模式</label>
+                <select id="usb-mode">
+                    <option value="40">AT%MODE=40 RNDIS（推荐，最通用）</option>
+                    <option value="41">AT%MODE=41 NCM</option>
+                    <option value="42">AT%MODE=42 ECM</option>
+                </select>
+            </div>
+            <div class="fg-actions">
+                <button class="cbi-button cbi-button-apply" id="btn-dial">启动自动拨号</button>
+                <button class="cbi-button cbi-button-reset" id="btn-stop">断开数据</button>
+                <button class="cbi-button cbi-button-action" id="btn-redial">重拨</button>
+                <button class="cbi-button" id="btn-set-mode">应用 USB 模式</button>
+            </div>
+            <div class="fg-profile-line fg-muted">
+                断开后自动重拨由守护进程 <code>fm350_dial.sh</code> 负责；连续 15 次失败会自动 reboot。USB 模式切换后设备会重新枚举，等待 5-10 秒。
+            </div>
+        </div>
+
+        <!-- ============ 下位机 DHCP/NAT ============ -->
+        <div class="fg-card">
+            <h3>下位机 PC DHCP / NAT</h3>
+            <div id="dhcp-kv" class="fg-kv"></div>
+            <div class="fg-row">
+                <label>下游网卡</label>
+                <div class="fg-profile-line fg-muted" id="down-iface">(等待识别)</div>
+            </div>
+            <div class="fg-actions">
+                <button class="cbi-button cbi-button-apply" id="btn-dhcp-start">启动 DHCP+NAT</button>
+                <button class="cbi-button cbi-button-reset" id="btn-dhcp-stop">停止</button>
+                <button class="cbi-button" id="btn-dhcp-restart">重启</button>
+                <button class="cbi-button cbi-button-action" id="btn-dhcp-lease">查看租约</button>
+            </div>
+            <div class="fg-profile-line fg-muted">
+                PC 通过 USB 数据线接入 FM350，自动被分配 192.168.42.x 网关 192.168.42.1。NAT 需要 <code>iptables</code> 二进制（FM350 rootfs 只有 .so，需从 NR90 提取 push）。
+            </div>
+            <pre id="dhcp-out" class="fg-log fg-hidden" style="margin-top:10px"></pre>
+        </div>
+
+        <!-- ============ 锁网 PLMN ============ -->
+        <div class="fg-card">
+            <h3>锁网 (PLMN MCC/MNC)</h3>
+            <div id="lock-kv" class="fg-kv"></div>
+            <div class="fg-row">
+                <label>自动选网</label>
+                <div class="fg-profile-line fg-muted">AT+COPS=0 恢复自由选网</div>
+            </div>
+            <div class="fg-row">
+                <label for="plmn">锁定运营商</label>
+                <div>
+                    <select id="plmn">
+                        <option value="">(自定义 MCCMNC)</option>
+                        <option value="46000">46000 中国移动</option>
+                        <option value="46001">46001 中国联通</option>
+                        <option value="46003">46003 中国电信</option>
+                        <option value="46008">46008 中国广电</option>
+                    </select>
+                    <input id="plmn-custom" type="text" maxlength="6" placeholder="或直接输入如 46007" style="margin-top:4px">
+                </div>
+            </div>
+            <div class="fg-actions">
+                <button class="cbi-button cbi-button-apply" id="btn-lock-net">应用锁定</button>
+                <button class="cbi-button cbi-button-reset" id="btn-unlock-net">解锁自动选网</button>
+            </div>
+        </div>
+
+        <!-- ============ 锁频段 ============ -->
+        <div class="fg-card">
+            <h3>NR 5G 频段</h3>
+            <div class="fg-band-list" id="nr-bands"></div>
+            <div class="fg-actions">
+                <button class="cbi-button" data-select-all="nr">全选</button>
+                <button class="cbi-button" data-clear-all="nr">清空</button>
+                <button class="cbi-button cbi-button-apply" id="btn-set-nr-bands">应用所选 NR 频段</button>
+                <button class="cbi-button cbi-button-reset" id="btn-restore-nr">恢复全部 NR</button>
+            </div>
+            <label class="fg-muted"><input id="nr-reconnect" type="checkbox"> 应用后执行 CFUN=4/1 重注册</label>
+            <div class="fg-profile-line" id="nr-current-note">当前 FM350 频段：等待读取……</div>
+        </div>
+
+        <div class="fg-card">
+            <h3>LTE 4G 频段</h3>
+            <div class="fg-band-list" id="lte-bands"></div>
+            <div class="fg-actions">
+                <button class="cbi-button" data-select-all="lte">全选</button>
+                <button class="cbi-button" data-clear-all="lte">清空</button>
+                <button class="cbi-button cbi-button-apply" id="btn-set-lte-bands">应用所选 LTE 频段</button>
+                <button class="cbi-button cbi-button-reset" id="btn-restore-lte">恢复全部 LTE</button>
+            </div>
+            <label class="fg-muted"><input id="lte-reconnect" type="checkbox"> 应用后执行 CFUN=4/1 重注册</label>
+            <div class="fg-profile-line" id="lte-current-note">当前 FM350 频段：等待读取……</div>
+        </div>
+
+        <!-- ============ 锁频点 ============ -->
+        <div class="fg-card">
+            <h3>锁频点 (NARFCN / EARFCN)</h3>
+            <div id="freq-kv" class="fg-kv"></div>
+            <div class="fg-row">
+                <label for="freq">ARFCN / EARFCN</label>
+                <input id="freq" type="number" min="0" max="4294967295" placeholder="例如 n78=632688 n41=499200">
+            </div>
+            <div class="fg-row">
+                <label>快速预设</label>
+                <div class="fg-at-presets">
+                    <button class="cbi-button" data-freq="632688">n78 632688</button>
+                    <button class="cbi-button" data-freq="640864">n78 640864</button>
+                    <button class="cbi-button" data-freq="499200">n41 499200</button>
+                    <button class="cbi-button" data-freq="551680">n41 551680</button>
+                    <button class="cbi-button" data-freq="145952">n28 145952</button>
+                    <button class="cbi-button" data-freq="426666">n1 426666</button>
+                    <button class="cbi-button" data-freq="460000">n3 460000</button>
+                    <button class="cbi-button" data-freq="176000">n5 176000</button>
+                    <button class="cbi-button" data-freq="700000">n79 700000</button>
+                    <button class="cbi-button" data-freq="530000">n7 530000</button>
+                    <button class="cbi-button" data-freq="136000">n8 136000</button>
+                </div>
+            </div>
+            <div class="fg-actions">
+                <button class="cbi-button cbi-button-apply" id="btn-lock-freq">锁定频点</button>
+                <button class="cbi-button cbi-button-reset" id="btn-unlock-freq">解锁频点</button>
+            </div>
+            <p class="fg-muted">FR1 Sub-6 常用：n78 620000-653333, n41 499200-537999, n28 145408-160600, n1 422000-434000, n3 440000-470000, n5 173800-178800, n7 524000-538000, n8 132600-138600, n79 693334-733333。锁错可能掉线。</p>
+        </div>
+
+        <!-- ============ 定时重启 ============ -->
+        <div class="fg-card">
+            <h3>定时自动重启</h3>
+            <div id="reboot-kv" class="fg-kv"></div>
+            <div class="fg-row">
+                <label>预设方案</label>
+                <div>
+                    <button class="cbi-button" data-reboot="0 3 * * * *">每天 00:03</button>
+                    <button class="cbi-button" data-reboot="0 30 2 * * *">每天 02:30</button>
+                    <button class="cbi-button" data-reboot="0 0 4 * * *">每天 04:00</button>
+                    <button class="cbi-button" data-reboot="0 0 3 * * 1">每周一 03:00</button>
+                    <button class="cbi-button" data-reboot="0 0 4 * * 1-5">工作日 04:00</button>
+                </div>
+            </div>
+            <div class="fg-row">
+                <label>自定义 cron</label>
+                <div>
+                    <input id="reboot-cron" type="text" placeholder="m h d mo w  (min hour day month weekday)" style="width:100%;font-family:monospace">
+                    <div class="fg-muted" style="margin-top:4px">例如 <code>0 3 * * *</code> = 每天 03:00；最小有效格式 <code>分 时 日 月 周</code></div>
+                </div>
+            </div>
+            <div class="fg-actions">
+                <button class="cbi-button cbi-button-apply" id="btn-reboot-set">设置定时重启</button>
+                <button class="cbi-button cbi-button-reset" id="btn-reboot-unset">清除计划</button>
+                <button class="cbi-button cbi-button-action" id="btn-reboot-now">立即重启设备</button>
+            </div>
+            <p class="fg-danger" style="margin-bottom:0">立即重启会中断所有连接，包括当前 Web 会话。</p>
+        </div>
+
+        <!-- ============ 短信 (跨两列宽) ============ -->
+        <div class="fg-card fg-card-wide">
+            <h3>短信收发</h3>
+            <div id="sms-kv" class="fg-kv"></div>
+            <h4 style="margin-top:14px">发送短信</h4>
+            <div class="fg-row">
+                <label for="sms-num">手机号</label>
+                <input id="sms-num" type="tel" maxlength="20" placeholder="13800138000">
+            </div>
+            <div class="fg-row">
+                <label for="sms-text">短信内容</label>
+                <textarea id="sms-text" class="fg-at-input" maxlength="500" placeholder="短信内容（单条最长 140 字节，中文减半）"></textarea>
+            </div>
+            <div class="fg-actions">
+                <button class="cbi-button cbi-button-apply" id="btn-sms-send">发送短信</button>
+                <button class="cbi-button" id="btn-sms-list">刷新短信列表</button>
+                <button class="cbi-button cbi-button-reset" id="btn-sms-delete-all">清空全部短信</button>
+            </div>
+            <h4 style="margin-top:14px">短信列表</h4>
+            <div class="fg-table-wrap">
+                <table class="fg-table" id="sms-table">
+                    <thead><tr><th>#</th><th>状态</th><th>号码</th><th>内容</th><th>操作</th></tr></thead>
+                    <tbody><tr><td colspan="5" class="fg-muted" style="text-align:center;padding:12px">点击"刷新短信列表"加载</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============ AT 调试窗口 (跨两列宽) ============ -->
+        <div class="fg-card fg-card-wide">
+            <h3>AT 命令调试</h3>
+            <p class="fg-muted">点击预置命令只会填入编辑框。发送后读取返回结果。</p>
+            <div class="fg-at-presets">
+                <button type="button" class="cbi-button" data-at="AT">AT</button>
+                <button type="button" class="cbi-button" data-at="ATI">ATI</button>
+                <button type="button" class="cbi-button" data-at="AT+CGMM">AT+CGMM</button>
+                <button type="button" class="cbi-button" data-at="AT+CGMR">AT+CGMR</button>
+                <button type="button" class="cbi-button" data-at="AT+CPIN?">AT+CPIN?</button>
+                <button type="button" class="cbi-button" data-at="AT+CIMI">AT+CIMI</button>
+                <button type="button" class="cbi-button" data-at="AT+COPS?">AT+COPS?</button>
+                <button type="button" class="cbi-button" data-at="AT+CSQ">AT+CSQ</button>
+                <button type="button" class="cbi-button" data-at="AT%HCSQ?">AT%HCSQ?</button>
+                <button type="button" class="cbi-button" data-at="AT^HCSQ?">AT^HCSQ?</button>
+                <button type="button" class="cbi-button" data-at="AT+CGDCONT?">AT+CGDCONT?</button>
+                <button type="button" class="cbi-button" data-at="AT+CGPADDR=3">AT+CGPADDR=3</button>
+                <button type="button" class="cbi-button" data-at="AT+CGACT?">AT+CGACT?</button>
+                <button type="button" class="cbi-button" data-at="AT%MODE?">AT%MODE?</button>
+                <button type="button" class="cbi-button cbi-button-action" data-at="AT+CFUN=4">AT+CFUN=4 (关射频)</button>
+                <button type="button" class="cbi-button cbi-button-action" data-at="AT+CFUN=1">AT+CFUN=1 (开射频)</button>
+            </div>
+            <textarea id="at-command" class="fg-at-input" maxlength="256" spellcheck="false" placeholder="例如：AT%HCSQ?">AT</textarea>
+            <div class="fg-actions">
+                <button class="cbi-button cbi-button-apply" id="btn-send-at">发送命令</button>
+                <button class="cbi-button" id="btn-clear-at">清空返回</button>
+            </div>
+            <pre id="at-output" class="fg-at-output">等待发送 AT 命令……</pre>
+        </div>
+    </div>
+
+    <div class="fg-alert fg-danger" style="margin-top:14px">
+        修改 USB 模式、锁网锁频、定时重启等会影响网络连接，请确认后操作。执行前建议点一次"刷新全部状态"核对当前参数。
+    </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

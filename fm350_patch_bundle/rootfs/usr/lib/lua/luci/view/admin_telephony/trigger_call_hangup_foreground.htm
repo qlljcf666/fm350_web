@@ -1,0 +1,13 @@
+<%+header%>
+
+<%
+	luci.sys.exec("mipc_wan_cli --hangup_foreground")
+%>
+
+<h2 name="content"><%:hanup foreground executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

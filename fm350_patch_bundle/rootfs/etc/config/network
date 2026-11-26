@@ -1,0 +1,39 @@
+# FM350 5G 模块网络配置 (一键补齐生成)
+config interface 'loopback'
+    option ifname 'lo'
+    option proto 'static'
+    option ipaddr '127.0.0.1'
+    option netmask '255.0.0.0'
+
+config globals 'globals'
+    option ula_prefix 'fd54:abcd:ef01::/48'
+
+# --- LAN (usb0, PC 接的 USB RNDIS gadget) ---
+config interface 'lan'
+    option ifname 'usb0'
+    option proto 'static'
+    option ipaddr '192.168.45.1'
+    option netmask '255.255.255.0'
+
+# --- WAN (ppp0 拨号接口, dhcp 获取 IP) ---
+config interface 'wan'
+    option ifname 'ppp0'
+    option proto 'dhcp'
+
+config zone 'lan'
+    list network 'lan'
+    option input 'ACCEPT'
+    option output 'ACCEPT'
+    option forward 'ACCEPT'
+
+config zone 'wan'
+    list network 'wan'
+    option input 'REJECT'
+    option output 'ACCEPT'
+    option forward 'MASQ'
+    option masq '1'
+    option mtu_fix '1'
+
+config forwarding
+    option src 'lan'
+    option dest 'wan'

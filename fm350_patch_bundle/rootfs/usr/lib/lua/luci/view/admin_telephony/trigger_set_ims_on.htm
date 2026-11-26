@@ -1,0 +1,13 @@
+<%+header%>
+
+<%
+	luci.sys.exec("mipc_wan_cli --ims_set_config 3")
+%>
+
+<h2 name="content"><%:Set IMS on executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

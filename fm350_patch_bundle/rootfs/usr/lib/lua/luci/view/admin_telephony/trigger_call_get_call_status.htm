@@ -1,0 +1,11 @@
+<%+header%>
+
+<h3 name="status"><%=luci.sys.exec("mipc_wan_cli --get_call_status")%></h3>
+
+<h2 name="content"><%:get call status executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>

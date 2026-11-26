@@ -1,0 +1,192 @@
+#!/bin/sh /etc/rc.common
+# FM350 Web Console — 统一启动入口
+# ====================================
+# 启动项:
+#   1. busybox httpd      (Web 页面 + Shell CGI)
+#   2. udhcpd             (给 PC 下位机发 DHCP)
+#   3. iptables NAT       (MASQUERADE 转发)
+#   4. fm350_dial.sh      (自动拨号 + 断线重拨)
+#   5. fm350_sms.sh       (短信轮询守护)
+#   6. crond              (定时重启 cron)
+# ====================================
+
+START=99
+USE_PROCD=1
+
+FM350_DIR="/etc/fm350"
+WEB_ROOT="/www"
+CGI_BIN="/www/cgi-bin"
+LOG_TAG="fm350_web"
+
+log_msg() { logger -t "$LOG_TAG" -p user.info "$*"; echo "$*"; }
+log_err() { logger -t "$LOG_TAG" -p user.error "$*"; echo "$*" >&2; }
+
+prepare_env() {
+    mkdir -p "$FM350_DIR"
+    mkdir -p /var/run/fm350
+    mkdir -p /www/cgi-bin
+    touch /var/log/fm350_dial.log /var/log/fm350_sms.log /var/log/fm350_reboot.log
+    # 确保 crontabs 目录存在
+    mkdir -p /etc/crontabs
+    touch /etc/crontabs/root
+}
+
+# ---------- 1. httpd ----------
+start_web() {
+    log_msg "starting busybox httpd ..."
+    killall httpd 2>/dev/null
+
+    cat > /etc/httpd.conf <<HTTPD
+:80
+$WEB_ROOT
+$CGI_BIN
+50
+60
+text/html  html htm
+text/css   css
+application/javascript js
+image/png  png
+image/jpeg jpg jpeg
+application/json json
+HTTPD
+
+    procd_open_instance fm350_httpd
+    procd_set_param command /bin/httpd -p 80 -h "$WEB_ROOT" -c /etc/httpd.conf
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+    log_msg "httpd on :80"
+}
+stop_web() { killall httpd 2>/dev/null; }
+
+# ---------- 2. DHCP udhcpd ----------
+start_dhcp() {
+    local dev
+    for d in usb0 ccmni0 ccmni1 eth1 eth2; do
+        [ -e "/sys/class/net/$d" ] && { dev="$d"; break; }
+    done
+    [ -z "$dev" ] && { log_err "no downstream netdev!"; return 1; }
+    log_msg "DHCP downstream = $dev"
+    sleep 1
+    ifconfig "$dev" up 192.168.42.1 netmask 255.255.255.0 2>/dev/null || {
+        ip link set "$dev" up; ip addr flush dev "$dev"
+        ip addr add 192.168.42.1/24 dev "$dev"
+    }
+    cat > /etc/udhcpd.conf <<UDHCPD
+start           192.168.42.2
+end             192.168.42.254
+interface       $dev
+max_leases      20
+lease_file      /var/run/fm350/udhcpd.leases
+remaining       yes
+auto_time       3600
+opt dns         223.5.5.5 119.29.29.29
+opt gateway     192.168.42.1
+opt subnet      255.255.255.0
+opt wpad        0
+UDHCPD
+    killall udhcpd 2>/dev/null; sleep 0.3
+    procd_open_instance fm350_udhcpd
+    procd_set_param command /bin/udhcpd /etc/udhcpd.conf -f
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+    log_msg "udhcpd on $dev 192.168.42.1/24"
+}
+stop_dhcp() { killall udhcpd 2>/dev/null; }
+
+# ---------- 3. NAT ----------
+start_nat() {
+    log_msg "setting up NAT ..."
+    echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null
+    echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null
+
+    local wan_dev
+    for d in wwan0 usb0 ccmni0 eth0; do
+        [ -e "/sys/class/net/$d" ] && ip route | grep -q "dev $d" && { wan_dev="$d"; break; }
+    done
+    [ -z "$wan_dev" ] && wan_dev=$(ip route get 8.8.8.8 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')
+    [ -z "$wan_dev" ] && wan_dev="usb0"
+
+    iptables -t nat -F POSTROUTING 2>/dev/null
+    iptables -t nat -F PREROUTING 2>/dev/null
+    iptables -t filter -F FORWARD 2>/dev/null
+    iptables -t nat -A POSTROUTING -o "$wan_dev" -j MASQUERADE 2>/dev/null
+    iptables -I FORWARD -i "$wan_dev" -o usb0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
+    iptables -I FORWARD -i usb0 -o "$wan_dev" -j ACCEPT 2>/dev/null
+    iptables -I FORWARD -i "$wan_dev" -o ccmni0 -m state --state RELATED,ESTABLISHED -j ACCEPT 2>/dev/null
+    iptables -I FORWARD -i ccmni0 -o "$wan_dev" -j ACCEPT 2>/dev/null
+
+    log_msg "NAT enabled (wan=$wan_dev)"
+}
+stop_nat() {
+    iptables -t nat -F POSTROUTING 2>/dev/null
+    iptables -t filter -F FORWARD 2>/dev/null
+}
+
+# ---------- 4. 自动拨号守护 (断线自动重拨在脚本内部) ----------
+start_dial() {
+    [ -x /usr/bin/fm350_dial.sh ] || { log_err "fm350_dial.sh missing!"; return 1; }
+    procd_open_instance fm350_dial
+    procd_set_param command /usr/bin/fm350_dial.sh
+    procd_set_param respawn 3 60 3
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+    log_msg "auto-dial daemon started"
+}
+stop_dial() { killall fm350_dial.sh 2>/dev/null; }
+
+# ---------- 5. SMS 守护 ----------
+start_sms() {
+    [ -x /usr/bin/fm350_sms.sh ] || return
+    procd_open_instance fm350_sms
+    procd_set_param command /usr/bin/fm350_sms.sh poll
+    procd_set_param respawn 3 30 3
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+    log_msg "SMS polling daemon started"
+}
+stop_sms() { killall fm350_sms.sh 2>/dev/null; }
+
+# ---------- 6. crond (定时重启) ----------
+start_cron() {
+    command -v crond >/dev/null 2>&1 || return
+    procd_open_instance fm350_crond
+    procd_set_param command /usr/sbin/crond -f
+    procd_set_param respawn
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_close_instance
+    log_msg "crond started"
+}
+stop_cron() { killall crond 2>/dev/null; }
+
+# ---------- 主入口 ----------
+start_service() {
+    prepare_env
+    start_web
+    sleep 3
+    start_dhcp
+    start_nat
+    start_dial
+    start_sms
+    start_cron
+    log_msg "=== ALL SERVICES STARTED ==="
+}
+
+stop_service() {
+    stop_dial
+    stop_sms
+    stop_cron
+    stop_nat
+    stop_dhcp
+    stop_web
+}
+
+service_triggers() {
+    procd_add_reload_trigger "network"
+}

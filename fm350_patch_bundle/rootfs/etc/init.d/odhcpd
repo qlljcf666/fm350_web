@@ -1,0 +1,35 @@
+#!/bin/sh /etc/rc.common
+
+START=35
+STOP=85
+USE_PROCD=1
+
+start_service() {
+    #20210724 disable odhcpd when FWA startup start
+    if [ ! -f /data/startup_option ]; then
+		cp /etc/startup_option /data
+	fi
+
+	startup_option="$(cat /data/startup_option)"
+	[ -z "$startup_option" ] && startup_option="1"
+	if [ "$startup_option" != "1" ] ; then
+		echo "Not start odhcpd"
+		exit 0
+	fi
+	#20210724 disable odhcpd when FWA startup end
+	
+	procd_open_instance
+	procd_set_param command /usr/sbin/odhcpd
+	procd_set_param respawn
+	procd_close_instance
+}
+
+reload_service() {
+	procd_send_signal odhcpd
+}
+
+service_triggers()
+{
+	procd_add_reload_trigger "dhcp"
+}
+

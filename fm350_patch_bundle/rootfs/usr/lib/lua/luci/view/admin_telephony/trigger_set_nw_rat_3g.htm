@@ -1,0 +1,13 @@
+<%+header%>
+
+<%
+	luci.sys.exec("mipc_wan_cli --nw_set_rat 1")
+%>
+
+<h2 name="content"><%:Set network RAT to 3G executed!%></h2>
+
+<body>
+<input type="button" value="Back" onclick="window.history.back()">
+</body>
+
+<%+footer%>
